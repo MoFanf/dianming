@@ -1,4 +1,4 @@
-﻿# 系统/临时文件
+# 系统/临时文件
 .DS_Store
 Thumbs.db
 *.zip
@@ -7,3 +7,6 @@ Thumbs.db
 # 本地测试产物（不提交）
 _test.html
 _shots/
+# 生成物与归档（不提交）
+deploy/
+_archive/

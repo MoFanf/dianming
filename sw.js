@@ -1,9 +1,8 @@
-const CACHE = 'dianming-v3';
+const CACHE = 'dianming-v6';
 const ASSETS = [
   './index.html',
   './style.css',
   './app.js',
-  './xlsx.full.min.js',
   './manifest.json',
   './icons/icon-180.png',
   './icons/icon-192.png',
@@ -11,7 +10,14 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE)
+      .then((c) => c.addAll(ASSETS).then(() => Promise.all(
+        ['./sounds/in.mp3', './sounds/out.mp3', './sounds/out-alt.mp3', './sounds/leave.mp3']
+          .map((u) => c.add(u).catch(() => {}))
+      )))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (e) => {

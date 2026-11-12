@@ -4,7 +4,7 @@ var S = load();
 var V = { name: 'home', q: '', batchId: null, rollQ: '', histTab: 'list', editTab: 'drag', ledgerSort: 'out', ledgerDir: -1, selMode: false, selIds: {} };
 
 function load() {
-  var base = { theme: 'light', random: false, lists: [], activeId: null, roll: null, glass: 0.55, sound: true };
+  var base = { theme: 'light', random: false, lists: [], activeId: null, roll: null, glass: 0.55, sound: true, soundTheme: 'clear', outAlt: false };
   try {
     var raw = JSON.parse(localStorage.getItem(KEY));
     if (raw && typeof raw === 'object') {
@@ -25,6 +25,21 @@ function esc(s) {
   });
 }
 function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+var xlsxState = 0;
+function ensureXLSX(cb) {
+  if (window.XLSX) { cb(); return; }
+  if (xlsxState === 2) { cb(); return; }
+  if (xlsxState === 1) {
+    var poll = setInterval(function () { if (xlsxState === 2) { clearInterval(poll); cb(); } }, 100);
+    return;
+  }
+  xlsxState = 1;
+  var s = document.createElement('script');
+  s.src = 'xlsx.full.min.js';
+  s.onload = function () { xlsxState = 2; cb(); };
+  s.onerror = function () { xlsxState = 0; toast('Excel 解析组件加载失败，请联网重试'); };
+  document.head.appendChild(s);
+}
 function today() {
   var d = new Date();
   return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
@@ -54,42 +69,75 @@ function applyGlass() {
   document.documentElement.style.setProperty('--glass-a', S.glass);
 }
 var audioCtx = null;
+var sndKeys = ['in', 'out', 'out-alt', 'leave'];
+var snd = { ready: false, files: {}, ok: {} };
+function ensureSnd() {
+  if (snd.ready) return;
+  snd.ready = true;
+  sndKeys.forEach(function (k) {
+    var a = new Audio('sounds/' + k + '.mp3');
+    a.preload = 'auto';
+    a.oncanplaythrough = function () { snd.ok[k] = true; };
+    a.onerror = function () { snd.ok[k] = false; };
+    snd.files[k] = a;
+  });
+}
+function playSnd(k) {
+  sndKeys.forEach(function (x) {
+    var a = snd.files[x];
+    if (a) { try { a.pause(); a.currentTime = 0; } catch (e) {} }
+  });
+  var a = snd.files[k];
+  if (!a) return false;
+  try { a.currentTime = 0; a.play(); return true; } catch (e) { return false; }
+}
+function synth(type) {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  var th = S.soundTheme || 'clear';
+  var t = audioCtx.currentTime;
+  function tone(f0, f1, dur, wave, vol, delay) {
+    delay = delay || 0;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = wave;
+    o.frequency.setValueAtTime(f0, t + delay);
+    if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + delay + dur);
+    g.gain.setValueAtTime(0.0001, t + delay);
+    g.gain.exponentialRampToValueAtTime(vol, t + delay + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + delay + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t + delay); o.stop(t + delay + dur + 0.03);
+  }
+  if (type === 'in') {
+    if (th === 'soft') { tone(660, 660, .14, 'sine', .10); tone(880, 880, .2, 'sine', .10, .12); }
+    else if (th === 'wood') { tone(520, 520, .12, 'triangle', .14); tone(700, 700, .18, 'triangle', .12, .1); }
+    else if (th === 'retro') { tone(660, 660, .08, 'square', .08); tone(880, 880, .08, 'square', .08, .08); tone(1100, 1100, .1, 'square', .08, .16); }
+    else { tone(880, 1318, .18, 'sine', .15); tone(1318, 1760, .2, 'sine', .12, .12); }
+  } else if (type === 'out') {
+    if (th === 'soft') { tone(300, 180, .3, 'sine', .10); }
+    else if (th === 'wood') { tone(240, 160, .28, 'triangle', .14); }
+    else if (th === 'retro') { tone(200, 120, .3, 'square', .10); tone(150, 90, .3, 'square', .08, .06); }
+    else { tone(392, 392, .18, 'triangle', .12); tone(311, 311, .18, 'triangle', .12, .09); tone(262, 262, .3, 'triangle', .12, .18); }
+  } else {
+    if (th === 'soft') { tone(520, 780, .2, 'sine', .10); }
+    else if (th === 'wood') { tone(660, 520, .2, 'triangle', .12); }
+    else if (th === 'retro') { tone(440, 660, .16, 'square', .08); tone(660, 880, .18, 'square', .08, .12); }
+    else { tone(523, 523, .12, 'triangle', .12); tone(659, 659, .12, 'triangle', .12, .1); tone(784, 1046, .22, 'triangle', .13, .2); }
+  }
+}
 function beep(type) {
   try {
     if (!S.sound) return;
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    var t = audioCtx.currentTime;
-    var osc = audioCtx.createOscillator();
-    var g = audioCtx.createGain();
-    osc.connect(g); g.connect(audioCtx.destination);
-    if (type === 'in') {
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, t);
-      osc.frequency.exponentialRampToValueAtTime(1318, t + 0.12);
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.16, t + 0.015);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
-      osc.start(t); osc.stop(t + 0.2);
-    } else if (type === 'out') {
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(240, t);
-      osc.frequency.exponentialRampToValueAtTime(160, t + 0.16);
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.18, t + 0.015);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
-      osc.start(t); osc.stop(t + 0.24);
-    } else if (type === 'leave') {
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(660, t);
-      osc.frequency.exponentialRampToValueAtTime(520, t + 0.14);
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.14, t + 0.015);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
-      osc.start(t); osc.stop(t + 0.22);
-    }
+    ensureSnd();
+    var key = (type === 'out' && S.outAlt) ? 'out-alt' : type;
+    if (snd.ok[key] && playSnd(key)) return;
+    synth(type);
   } catch (e) {}
 }
+try {
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ensureSnd);
+  else ensureSnd();
+} catch (e) {}
 function render() {
   document.body.setAttribute('data-theme', S.theme === 'dark' ? 'dark' : 'light');
   applyGlass();
@@ -131,6 +179,90 @@ function swapIcon() {
   return `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M8 7h12m0 0l-3-3m3 3l-3 3M16 17H4m0 0l3 3m-3-3l3-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
 
+/* ---------------- 趣味与动效 ---------------- */
+function fishSvg() {
+  return `<svg class="mascot" viewBox="0 0 64 64" aria-hidden="true"><path d="M8 32C16 20 36 19 46 29L56 21V43L46 35C36 45 16 44 8 32Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><circle cx="36" cy="28.5" r="2.2" fill="currentColor"/></svg>`;
+}
+function fullQuip(id) {
+  var lines = ['这轮漂亮，一个都没少。', '全员到齐，可以收工了。', '今天的出勤，稳。', '点名完成，继续保持。'];
+  var s = String(id || ''), n = 0;
+  for (var i = 0; i < s.length; i++) n += s.charCodeAt(i);
+  return lines[n % lines.length];
+}
+function streakCount(L) {
+  if (!L || !Array.isArray(L.batches)) return 0;
+  var n = 0;
+  for (var i = 0; i < L.batches.length; i++) {
+    var c = batchStats(L.batches[i]);
+    if (c.in > 0 && c.out === 0 && c.leave === 0 && c.none === 0) n++;
+    else break;
+  }
+  return n;
+}
+function countUp() {
+  var els = document.querySelectorAll('.stat b');
+  if (!els.length) return;
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  els.forEach(function (el) {
+    var target = parseInt(el.textContent, 10) || 0;
+    if (reduce || target === 0) return;
+    var t0 = performance.now(), dur = 520;
+    el.textContent = '0';
+    function step(t) {
+      var p = Math.min(1, (t - t0) / dur);
+      var e = 1 - Math.pow(1 - p, 3);
+      el.textContent = String(Math.round(target * e));
+      if (p < 1) requestAnimationFrame(step); else el.textContent = String(target);
+    }
+    requestAnimationFrame(step);
+  });
+}
+function confetti(n) {
+  if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var cv = document.createElement('canvas');
+  cv.className = 'confetti';
+  var dpr = Math.min(2, window.devicePixelRatio || 1);
+  var W = window.innerWidth, H = window.innerHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  cv.style.width = W + 'px'; cv.style.height = H + 'px';
+  document.body.appendChild(cv);
+  var ctx = cv.getContext('2d');
+  ctx.scale(dpr, dpr);
+  var cols = ['#1f6b4e', '#a83a28', '#2c5a85', '#e0b34c', '#23211c'];
+  var ps = [];
+  for (var i = 0; i < n; i++) {
+    ps.push({
+      x: W / 2 + (Math.random() - .5) * W * .4,
+      y: H * .42 + (Math.random() - .5) * 40,
+      vx: (Math.random() - .5) * 7,
+      vy: -(4 + Math.random() * 7),
+      g: .3 + Math.random() * .12,
+      w: 3 + Math.random() * 4,
+      h: 6 + Math.random() * 6,
+      c: cols[(Math.random() * cols.length) | 0],
+      rot: Math.random() * Math.PI,
+      vr: (Math.random() - .5) * .3
+    });
+  }
+  var t0 = performance.now(), dur = 1900;
+  function frame(t) {
+    var el = t - t0;
+    if (el > dur) { cv.remove(); return; }
+    ctx.clearRect(0, 0, W, H);
+    for (var j = 0; j < ps.length; j++) {
+      var p = ps[j];
+      p.vy += p.g; p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+      ctx.globalAlpha = Math.max(0, 1 - el / dur);
+      ctx.fillStyle = p.c;
+      ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      ctx.restore();
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
 /* ---------------- 首页 ---------------- */
 function viewHome() {
   var L = list();
@@ -138,6 +270,7 @@ function viewHome() {
   if (!L) {
     body = `<div class="homecenter">
       <div class="emptycard">
+        ${fishSvg()}
         <div class="k">还没有名单</div>
         <div class="n">先建一套名单</div>
         <div class="meta">一套名单对应一个班或场合，可建多套随时切换</div>
@@ -155,6 +288,23 @@ function viewHome() {
         <div class="row"><button class="mini primary" data-act="resumeRoll">继续本轮</button>
         <button class="mini danger" data-act="dropRoll">放弃本轮</button></div></div>`;
     }
+    var last = L.batches && L.batches.length ? L.batches[0] : null;
+    var lastHtml = '';
+    if (last) {
+      var lc = batchStats(last);
+      var absent = [];
+      (last.records || []).forEach(function (x) { if (x.st === 'out') absent.push(x.name); });
+      var tail = absent.length
+        ? '缺席：' + esc(absent.slice(0, 4).join('、')) + (absent.length > 4 ? ' 等 ' + absent.length + ' 人' : '')
+        : (lc.none ? lc.none + ' 人未记录' : '全员到齐，漂亮');
+      lastHtml = `<button class="lastcard" data-act="openLast" data-id="${last.id}">
+        <div class="lc-top"><span>上一轮</span><span>${last.createdAt ? stamp(last.createdAt) : ''} ›</span></div>
+        <div class="lc-stats"><b class="in">${lc.in}</b><span>到</span><b class="out">${lc.out}</b><span>缺</span><b class="leave">${lc.leave}</b><span>假</span>${lc.none ? `<em>${lc.none} 未记录</em>` : ''}</div>
+        <div class="lc-names">${tail}</div>
+      </button>`;
+    }
+    var st = streakCount(L);
+    var streakHtml = st >= 2 ? `<div class="streak">连续 ${st} 轮全勤</div>` : '';
     body = `<div class="homecenter">
       <div class="listlabel">当前名单</div>
       <div class="listnamewrap">
@@ -162,15 +312,24 @@ function viewHome() {
         <button class="swapbtn" data-act="swapList" aria-label="更换名单">${swapIcon()}</button>
       </div>
       <div class="listmeta">${L.members.length} 人 · 已点 ${rounds} 轮</div>
+      ${streakHtml}
       ${resume}
-      <button class="roundbtn" data-act="startRoll"><span class="rbt">开始点名</span><span class="rbs">右滑到 · 左滑缺席 · 下滑请假</span></button>
+      <button class="roundbtn" data-act="startRoll" aria-label="开始点名">
+        <svg class="play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>
+        <span class="rbt">开始点名</span>
+        <span class="rbs">轻点开始 · 可随时暂停</span>
+      </button>
+      <div class="gestures" aria-hidden="true">
+        <span class="gchip in">→ 到</span><span class="gchip out">← 缺席</span><span class="gchip leave">↓ 请假</span>
+      </div>
+      ${lastHtml}
     </div>
     <div class="homebottom">
       <button class="hbtn" data-act="goLists"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>名单管理</button>
       <button class="hbtn" data-act="goHistory"><svg viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 8v4l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>历史记录</button>
     </div>`;
   }
-  return header('点名考勤', '数据存本机 · 可离线', gearBtn()) + body;
+  return header('点名考勤', '', gearBtn()) + body;
 }
 
 /* ---------------- 名单快速切换 ---------------- */
@@ -195,8 +354,9 @@ function showSwapDialog() {
   m.querySelector('[data-dlg="cancel"]').onclick = closeDialog;
   m.querySelector('[data-dlg="new"]').onclick = function () {
     closeDialog();
-    createList();
-    V.name = 'members'; V.q = ''; render(); toast('已新建名单，先添加人员');
+    showPrompt('新建名单', '', function (v) {
+      createList(v); V.name = 'members'; V.q = ''; render(); toast('已新建名单「' + v + '」，先添加人员');
+    });
   };
   m.querySelectorAll('[data-swap]').forEach(function (b) {
     b.onclick = function () {
@@ -216,23 +376,31 @@ function viewRoll() {
   var remain = r.order.length - r.idx;
   var undoBtn = `<button class="iconbtn" data-act="undoMark" aria-label="撤销"${r.idx > 0 ? '' : ' disabled'}><svg viewBox="0 0 24 24" width="20" height="20"><path d="M9 13l-4-4 4-4M5 9h9a5 5 0 010 10h-2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
   var exitBtn = `<button class="iconbtn" data-act="exitRoll" aria-label="退出"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>`;
+  var prog = r.order.length ? ((r.idx + 1) / r.order.length * 100) : 0;
+  function peek(i) {
+    var mi = r.order[r.idx + i];
+    return mi ? `<div class="stackcard s${i}"><span>${esc(memberById(mi).name)}</span></div>` : '';
+  }
   return `${header('正在点名', r.batchName, undoBtn + exitBtn)}
     <div class="track"><i style="width:${pct}%"></i></div>
     <div class="rollq">
-      <input id="rollq" placeholder="搜姓名/学号，点结果跳转" value="${esc(V.rollQ)}">
+      <input id="rollq" aria-label="搜索成员" placeholder="搜姓名/学号，点结果跳转" value="${esc(V.rollQ)}">
       <div id="rollhits" class="rollhits" hidden></div>
     </div>
     <div class="deck">
-      <i class="ghost g1"></i><i class="ghost g2"></i>
+      <div class="stack">${peek(2)}${peek(1)}</div>
       <div class="card3d enter" id="card" data-tint="">
-        <div class="no">#${pad2(r.idx + 1)}</div>
-        <div class="sid">${esc(m.sid)}</div>
+        <div class="cardtop"><span>#${pad2(r.idx + 1)}</span><span>${r.idx + 1} / ${r.order.length}</span></div>
+        <div class="cardbar"><i style="width:${prog}%"></i></div>
         <div class="nm">${esc(m.name)}</div>
         ${m.note ? `<div class="nt">${esc(m.note)}</div>` : ''}
+        <div class="sidline">${esc(m.sid || '—')}</div>
         <div class="ft"><span>本轮第 ${r.idx + 1} 位</span><span>余 ${remain} 人</span></div>
       </div>
     </div>
-    <div class="gesturehint">右滑到 · 左滑缺席 · 下滑请假</div>
+    <div class="gestures" aria-hidden="true">
+      <span class="gchip in">→ 到</span><span class="gchip out">← 缺席</span><span class="gchip leave">↓ 请假</span>
+    </div>
     <div class="acts">
       <button class="btn btn-out" data-mark="out">缺席</button>
       <button class="btn btn-leave" data-mark="leave">请假</button>
@@ -381,8 +549,11 @@ function finalizeRoll() {
   var batch = { id: r.batchId, name: r.batchName, createdAt: Date.now(), records: records };
   if (!Array.isArray(L.batches)) L.batches = [];
   L.batches.unshift(batch);
+  var cs = batchStats(batch);
+  if (cs.in > 0 && cs.out === 0 && cs.leave === 0 && cs.none === 0) V.party = batch.id;
   S.roll = null;
   save();
+  try { if (navigator.vibrate) navigator.vibrate([10, 36, 14]); } catch (e) {}
   V.name = 'summary'; V.batchId = batch.id;
   render();
 }
@@ -396,8 +567,9 @@ function batchById(id) {
 }
 function batchStats(b) {
   var c = { in: 0, out: 0, leave: 0, none: 0 };
-  for (var i = 0; i < b.records.length; i++) {
-    var st = b.records[i].st;
+  var rs = (b && b.records) || [];
+  for (var i = 0; i < rs.length; i++) {
+    var st = rs[i].st;
     if (c[st] !== undefined) c[st]++; else c.none++;
   }
   return c;
@@ -412,29 +584,26 @@ function viewSummary() {
     else if (x.st === 'leave') leaveNames.push(x.name + (x.note ? '（' + x.note + '）' : ''));
     else if (!x.st) noneNames.push(x.name);
   });
+  var full = c.in > 0 && c.out === 0 && c.leave === 0 && c.none === 0;
+  var banner = full ? `<div class="celebrate">${fishSvg()}<div><div class="big">全勤 · 一个都没少</div><div class="muted">${c.in} 人到齐，本轮点名完成</div></div></div>` : '';
   return `${header('本轮结束', b.name, backBtn('homeFromSummary'))}
   <div class="wrap">
+    ${banner}
     <div class="stats">
-      <div class="stat in"><b>${c.in}</b><span>到了</span></div>
-      <div class="stat out"><b>${c.out}</b><span>缺席</span></div>
-      <div class="stat leave"><b>${c.leave}</b><span>请假</span></div>
+      <div class="stat in${c.in ? '' : ' zero'}"><b>${c.in}</b><span>到了</span></div>
+      <div class="stat out${c.out ? '' : ' zero'}"><b>${c.out}</b><span>缺席</span></div>
+      <div class="stat leave${c.leave ? '' : ' zero'}"><b>${c.leave}</b><span>请假</span></div>
     </div>
-    <div class="sec"><div class="t"><span>缺席 ${outNames.length} 人</span></div>
-      <div class="chips">${outNames.length ? outNames.map(function (n) { return `<span class="chip">${esc(n)}</span>`; }).join('') : '<span class="chip gray">无</span>'}</div></div>
-    <div class="sec"><div class="t"><span>请假 ${leaveNames.length} 人</span></div>
-      <div class="chips">${leaveNames.length ? leaveNames.map(function (n) { return `<span class="chip leave">${esc(n)}</span>`; }).join('') : '<span class="chip gray">无</span>'}</div></div>
+    ${outNames.length ? `<div class="sec"><div class="t"><span>缺席 ${outNames.length} 人</span></div>
+      <div class="chips">${outNames.map(function (n) { return `<span class="chip">${esc(n)}</span>`; }).join('')}</div></div>` : ''}
+    ${leaveNames.length ? `<div class="sec"><div class="t"><span>请假 ${leaveNames.length} 人</span></div>
+      <div class="chips">${leaveNames.map(function (n) { return `<span class="chip leave">${esc(n)}</span>`; }).join('')}</div></div>` : ''}
     ${noneNames.length ? `<div class="sec"><div class="t"><span>未记录 ${noneNames.length} 人</span></div>
       <div class="chips">${noneNames.map(function (n) { return `<span class="chip gray">${esc(n)}</span>`; }).join('')}</div></div>` : ''}
-    <div class="sec"><div class="row" style="gap:8px">
-      <button class="mini" data-act="copyList" style="flex:1">复制清单</button>
-      <button class="mini" data-act="copyTable" style="flex:1">复制表格</button>
-    </div></div>
-    <div class="sec"><div class="row" style="gap:8px">
-      <button class="mini primary" data-act="genImage" data-v="download" style="flex:1">生成图片</button>
-      <button class="mini" data-act="genImage" data-v="share" style="flex:1">分享图片</button>
-    </div></div>
+    <div class="sec"><button class="btn btn-line" data-act="showExport" style="width:100%">导出 / 分享</button></div>
     <div class="sec"><button class="btn btn-line" data-act="goEdit" style="width:100%">调整结果（拖拽改）</button></div>
     <div class="sec"><button class="btn btn-main" data-act="homeFromSummary" style="width:100%">回到首页</button></div>
+    ${full ? `<div class="fishline">${fishSvg()}<span>${fullQuip(b.id)}</span></div>` : ''}
   </div>`;
 }
 
@@ -617,9 +786,9 @@ function viewMembers() {
     return `<div class="mrow ${sel ? 'sel' : ''}" data-row="${i}" style="${hide ? 'display:none' : ''}">
       ${cb}<div class="idx">${i + 1}</div>
       <div class="f">
-        <input class="nm-i" data-mi="${i}" data-f="name" value="${esc(m.name)}" placeholder="姓名">
-        <input class="sid-i" data-mi="${i}" data-f="sid" value="${esc(m.sid)}" placeholder="学号">
-        <input class="note-i" data-mi="${i}" data-f="note" value="${esc(m.note)}" placeholder="备注（可留空）">
+        <input class="nm-i" data-mi="${i}" data-f="name" value="${esc(m.name)}" placeholder="姓名" aria-label="第 ${i + 1} 位姓名">
+        <input class="sid-i" data-mi="${i}" data-f="sid" value="${esc(m.sid)}" placeholder="学号" aria-label="第 ${i + 1} 位学号">
+        <input class="note-i" data-mi="${i}" data-f="note" value="${esc(m.note)}" placeholder="备注（可留空）" aria-label="第 ${i + 1} 位备注">
       </div>
     </div>`;
   }).join('');
@@ -637,13 +806,13 @@ function viewMembers() {
       </div>`;
   return header(L.name + ' · 成员', L.members.length + ' 人', backBtn('goLists')) +
     `<div class="wrap">
-      <input id="search" value="${esc(q)}" placeholder="搜姓名或学号" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:var(--card);color:var(--ink);font-size:15px">
+      <input id="search" aria-label="搜索成员" value="${esc(q)}" placeholder="搜姓名或学号" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:var(--card);color:var(--ink);font-size:15px">
       ${sel ? `<div class="selhint">已选 <span id="selCount">${Object.keys(sel).length}</span> 人</div>` : ''}
       ${sel ? '' : `<div class="addbox" style="margin-top:12px">
         <div class="fields">
-          <input id="addName" placeholder="姓名（必填）">
-          <input id="addSid" placeholder="学号">
-          <input id="addNote" placeholder="备注（如：走读、转专业）">
+          <input id="addName" aria-label="新成员姓名" placeholder="姓名（必填）">
+          <input id="addSid" aria-label="新成员学号" placeholder="学号">
+          <input id="addNote" aria-label="新成员备注" placeholder="备注（如：走读、转专业）">
         </div>
         <button class="btn btn-line" data-act="addMember">添加到名单</button>
       </div>`}
@@ -663,22 +832,24 @@ function pickRosterFile() {
     if (!f) return;
     var name = (f.name || '').toLowerCase();
     if (name.indexOf('.xlsx') >= 0 || name.indexOf('.xls') >= 0) {
-      if (typeof XLSX === 'undefined') { toast('解析库未加载'); return; }
-      var r = new FileReader();
-      r.onload = function () {
-        try {
-          var wb = XLSX.read(new Uint8Array(r.result), { type: 'array' });
-          var ws = wb.Sheets[wb.SheetNames[0]];
-          var rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
-          var text = rows.map(function (row) {
-            return row.map(function (c) { return String(c == null ? '' : c); }).join('\t');
-          }).join('\n');
-          var parsed = parseImport(text);
-          if (!parsed) { toast('没解析到成员，确认表里有「姓名/学号」列'); return; }
-          showImportConfirm(parsed);
-        } catch (err) { toast('解析失败：' + (err && err.message ? err.message : '未知')); }
-      };
-      r.readAsArrayBuffer(f);
+      toast('正在加载 Excel 解析组件…');
+      ensureXLSX(function () {
+        var r = new FileReader();
+        r.onload = function () {
+          try {
+            var wb = XLSX.read(new Uint8Array(r.result), { type: 'array' });
+            var ws = wb.Sheets[wb.SheetNames[0]];
+            var rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+            var text = rows.map(function (row) {
+              return row.map(function (c) { return String(c == null ? '' : c); }).join('\t');
+            }).join('\n');
+            var parsed = parseImport(text);
+            if (!parsed) { toast('没解析到成员，确认表里有「姓名/学号」列'); return; }
+            showImportConfirm(parsed);
+          } catch (err) { toast('解析失败：' + (err && err.message ? err.message : '未知')); }
+        };
+        r.readAsArrayBuffer(f);
+      });
       return;
     }
     var fr = new FileReader();
@@ -812,13 +983,13 @@ function viewHistory() {
     return `<option value="${l.id}" ${l.id === L.id ? 'selected' : ''}>${esc(l.name)}</option>`;
   }).join('');
   var content = tab === 'ledger' ? ledgerHtml() : historyListHtml(L);
+  var toggle = tab === 'ledger'
+    ? `<div class="row" style="margin-top:10px"><span class="muted">累计台账</span><button class="mini" data-act="histTab" data-v="list">← 返回历史记录</button></div>`
+    : `<div class="row" style="margin-top:10px"><span class="muted">历史记录</span><button class="mini" data-act="histTab" data-v="ledger">累计台账</button></div>`;
   return header('历史记录', L.name, backBtn('goHome')) +
     `<div class="wrap">
       <select id="histList" style="width:100%;margin-top:8px;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:var(--card);color:var(--ink);font-size:15px">${opts}</select>
-      <div class="segwrap" style="margin-top:10px">
-        <button class="seg ${tab === 'list' ? 'on' : ''}" data-act="histTab" data-v="list">历史记录</button>
-        <button class="seg ${tab === 'ledger' ? 'on' : ''}" data-act="histTab" data-v="ledger">累计台账</button>
-      </div>
+      ${toggle}
       ${content}
     </div>
     <div class="bottom"><button class="mini" data-act="goHome">返回首页</button>
@@ -958,13 +1129,9 @@ function viewEdit() {
       </div></div>`;
   }).join('');
   return header('调整结果', b.name, backBtn('backToSummary')) +
-    `<div class="segwrap" style="margin:10px 16px 0">
-      <button class="seg ${tab === 'drag' ? 'on' : ''}" data-act="editTab" data-v="drag">拖拽改</button>
-      <button class="seg ${tab === 'list' ? 'on' : ''}" data-act="editTab" data-v="list">逐条改</button>
-    </div>
-    <div class="wrap">
-      ${tab === 'drag' ? editDrag(b) : listHtml}
-      <div class="tip" style="padding:12px 0 0">拖拽改：按住名字拖到目标区域即可改状态；逐条改为点「到/缺/假」按钮。</div>
+    `<div class="wrap">
+      ${editDrag(b)}
+      <div class="tip" style="padding:12px 0 0">按住名字拖到目标区域即可改状态。</div>
     </div>
     <div class="bottom"><button class="mini" data-act="backToSummary">返回结算</button>
       <button class="mini" data-act="copyBatch">复制表格</button></div>`;
@@ -1074,13 +1241,28 @@ function viewSettings() {
         </div></div>
       <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:8px">
         <div class="lb">玻璃透明度<small>拖动即时预览 · 越实文字越清晰，越透越空灵</small></div>
-        <input type="range" id="glassRange" min="35" max="80" value="${Math.round(S.glass * 100)}" style="width:100%">
+        <input type="range" id="glassRange" aria-label="玻璃透明度" min="35" max="80" value="${Math.round(S.glass * 100)}" style="width:100%">
       </div>
       <div class="setting-row"><div class="lb">提示音效<small>到 / 缺席 / 请假的短提示音</small></div>
         <div class="themes">
           <button data-act="setSound" data-v="1" class="${S.sound ? 'on' : ''}">开</button>
           <button data-act="setSound" data-v="0" class="${S.sound ? '' : 'on'}">关</button>
         </div></div>
+      <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:8px">
+        <div class="lb">音效风格<small>自带合成音；也可放入 sounds/in.mp3 · out.mp3 · out-alt.mp3 · leave.mp3 用自定义音效</small></div>
+        <div class="themes" style="flex-wrap:wrap">
+          <button data-act="setSoundTheme" data-v="clear" class="${(S.soundTheme || 'clear') === 'clear' ? 'on' : ''}">清脆</button>
+          <button data-act="setSoundTheme" data-v="wood" class="${S.soundTheme === 'wood' ? 'on' : ''}">木质</button>
+          <button data-act="setSoundTheme" data-v="soft" class="${S.soundTheme === 'soft' ? 'on' : ''}">安静</button>
+          <button data-act="setSoundTheme" data-v="retro" class="${S.soundTheme === 'retro' ? 'on' : ''}">复古</button>
+        </div></div>
+      <div class="setting-row"><div class="lb">缺席音<small>自定义 mp3 生效时可选</small></div>
+        <div class="themes">
+          <button data-act="setOutAlt" data-v="0" class="${S.outAlt ? '' : 'on'}">暖冬回城</button>
+          <button data-act="setOutAlt" data-v="1" class="${S.outAlt ? 'on' : ''}">siuuuuu</button>
+        </div></div>
+      <div class="setting-row"><div class="lb">试听<small>依次播到 / 缺席 / 请假</small></div>
+        <button class="mini" data-act="testSound">试听</button></div>
       <div class="setting-row"><div class="lb">数据备份<small>导出成文件存到手机上，换机可导入</small></div>
         <button class="mini" data-act="backup">导出</button></div>
       <div class="setting-row"><div class="lb">从备份恢复</div>
@@ -1152,6 +1334,31 @@ function showBatchDialog(L) {
     });
   };
 }
+function showExportDialog() {
+  var m = mask();
+  m.hidden = false;
+  m.innerHTML = `<div class="dlg">
+    <h3>导出 / 分享</h3>
+    <div class="swapwrap">
+      <button class="swapitem" data-ex="copyList"><span class="si-n">复制清单</span><span class="si-m">文字版</span></button>
+      <button class="swapitem" data-ex="copyTable"><span class="si-n">复制表格</span><span class="si-m">可粘成 Excel</span></button>
+      <button class="swapitem" data-ex="genImage" data-v="download"><span class="si-n">生成图片</span><span class="si-m">保存到相册</span></button>
+      <button class="swapitem" data-ex="genImage" data-v="share"><span class="si-n">分享图片</span><span class="si-m">发给班委</span></button>
+    </div>
+    <div class="btns"><button class="btn btn-line" data-dlg="cancel">取消</button></div></div>`;
+  m.querySelector('[data-dlg="cancel"]').onclick = closeDialog;
+  m.querySelectorAll('[data-ex]').forEach(function (b) {
+    b.onclick = function () {
+      var ex = b.getAttribute('data-ex');
+      closeDialog();
+      if (ex === 'genImage') { genImage(b.getAttribute('data-v') || 'download'); return; }
+      var bb = batchById(V.batchId);
+      if (!bb) return;
+      if (ex === 'copyList') copyText(summaryText(bb), '清单已复制');
+      else copyText(tableText(bb), '表格已复制，可粘贴发给班委');
+    };
+  });
+}
 function showPrompt(title, value, cb) {
   var m = mask();
   m.hidden = false;
@@ -1173,10 +1380,14 @@ function showPrompt(title, value, cb) {
   inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') m.querySelector('[data-dlg="ok"]').click(); });
 }
 
-function createList() {
+function createList(name) {
   var n = 1;
-  while (S.lists.some(function (x) { return x.name === '名单' + n; })) n++;
-  var nl = { id: uid(), name: '名单' + n, members: [], batches: [] };
+  var nm = (name || '').trim();
+  if (!nm) {
+    while (S.lists.some(function (x) { return x.name === '名单' + n; })) n++;
+    nm = '名单' + n;
+  }
+  var nl = { id: uid(), name: nm, members: [], batches: [] };
   S.lists.push(nl); S.activeId = nl.id; save();
   return nl;
 }
@@ -1262,6 +1473,10 @@ function bind() {
     }
   }
   if (V.name === 'edit' && (V.editTab || 'drag') === 'drag') bindEditDrag();
+  if (V.name === 'summary') {
+    countUp();
+    if (V.party && V.party === V.batchId) { V.party = null; confetti(90); }
+  }
 }
 
 function act(a, el) {
@@ -1275,7 +1490,9 @@ function act(a, el) {
     case 'goMembers': { if (L) { V.name = 'members'; V.q = ''; render(); } break; }
 
     case 'newList': {
-      createList(); V.name = 'members'; V.q = ''; render(); toast('已建名单，先添加人员');
+      showPrompt('新建名单', '', function (v) {
+        createList(v); V.name = 'members'; V.q = ''; render(); toast('已建名单「' + v + '」，先添加人员');
+      });
       break;
     }
     case 'swapList': { showSwapDialog(); break; }
@@ -1302,6 +1519,7 @@ function act(a, el) {
     case 'exitRoll': { V.name = 'home'; render(); toast('本轮已保存，可随时继续'); break; }
     case 'undoMark': { undoMark(); break; }
     case 'homeFromSummary': { V.name = 'home'; render(); break; }
+    case 'openLast': { V.name = 'summary'; V.batchId = id; render(); break; }
     case 'backToSummary': { V.name = 'summary'; render(); break; }
     case 'goEdit': { V.name = 'edit'; V.editTab = 'drag'; render(); break; }
     case 'editTab': { V.editTab = el.getAttribute('data-v'); render(); break; }
@@ -1313,6 +1531,7 @@ function act(a, el) {
     case 'copyLedger': { copyText(ledgerText(), '台账表格已复制'); break; }
     case 'copyLedgerText': { copyText(ledgerPlain(), '台账文字已复制'); break; }
     case 'genImage': { genImage(el.getAttribute('data-v') || 'download'); break; }
+    case 'showExport': { showExportDialog(); break; }
 
     case 'openBatch': { V.name = 'batch'; V.batchId = id; render(); break; }
     case 'renameBatch': {
@@ -1401,14 +1620,24 @@ function act(a, el) {
     case 'importMembers': { pickRosterFile(); break; }
     case 'importPaste': { showPasteDialog(); break; }
     case 'importHome': {
-      createList(); V.name = 'members'; V.q = ''; render();
-      setTimeout(pickRosterFile, 60);
+      showPrompt('新建名单（导入名册）', '计算机242班', function (v) {
+        createList(v); V.name = 'members'; V.q = ''; render();
+        setTimeout(pickRosterFile, 60);
+      });
       break;
     }
 
     case 'setTheme': { S.theme = el.getAttribute('data-v'); save(); render(); break; }
     case 'setOrder': { S.random = el.getAttribute('data-v') === 'random'; save(); render(); break; }
     case 'setSound': { S.sound = el.getAttribute('data-v') === '1'; save(); render(); break; }
+    case 'setSoundTheme': { S.soundTheme = el.getAttribute('data-v'); save(); render(); beep('in'); break; }
+    case 'setOutAlt': { S.outAlt = el.getAttribute('data-v') === '1'; save(); render(); beep('out'); break; }
+    case 'testSound': {
+      beep('in');
+      setTimeout(function () { beep('out'); }, 700);
+      setTimeout(function () { beep('leave'); }, 1500);
+      break;
+    }
 
     case 'backup': {
       var fname = '点名备份_' + today() + '.json';
@@ -1435,6 +1664,7 @@ function act(a, el) {
           if (!confirm('用备份覆盖当前数据？')) return;
           S = d;
           if (!S.theme) S.theme = 'light';
+          if (!S.soundTheme) S.soundTheme = 'clear';
           if (!S.activeId && S.lists.length) S.activeId = S.lists[0].id;
           save(); render(); toast('已恢复 ' + S.lists.length + ' 套名单');
         };
@@ -1446,7 +1676,7 @@ function act(a, el) {
     case 'wipe': {
       if (!confirm('清空全部名单和记录？不可恢复。')) break;
       if (!confirm('再确认一次：清空后无法找回，确定吗？')) break;
-      S = { theme: S.theme, random: false, lists: [], activeId: null, roll: null };
+      S = { theme: S.theme, random: false, lists: [], activeId: null, roll: null, glass: 0.55, sound: true, soundTheme: 'clear', outAlt: false };
       save(); V.name = 'home'; render(); toast('已清空');
       break;
     }
