@@ -1,4 +1,4 @@
-const CACHE = 'dianming-v7';
+const CACHE = 'dianming-v8';
 const ASSETS = [
   './index.html',
   './style.css',

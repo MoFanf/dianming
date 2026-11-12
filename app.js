@@ -77,19 +77,25 @@ function ensureSnd() {
   sndKeys.forEach(function (k) {
     var a = new Audio('sounds/' + k + '.mp3');
     a.preload = 'auto';
-    a.oncanplaythrough = function () { snd.ok[k] = true; };
-    a.onerror = function () { snd.ok[k] = false; };
+    a.addEventListener('canplay', function () { snd.ok[k] = true; });
+    a.addEventListener('error', function () { snd.ok[k] = false; });
+    try { a.load(); } catch (e) {}
     snd.files[k] = a;
   });
 }
-function playSnd(k) {
+function playSnd(k, onFail) {
   sndKeys.forEach(function (x) {
     var a = snd.files[x];
-    if (a) { try { a.pause(); a.currentTime = 0; } catch (e) {} }
+    if (a && x !== k) { try { a.pause(); a.currentTime = 0; } catch (e) {} }
   });
   var a = snd.files[k];
   if (!a) return false;
-  try { a.currentTime = 0; a.play(); return true; } catch (e) { return false; }
+  try {
+    a.currentTime = 0;
+    var p = a.play();
+    if (p && p.catch) { p.catch(function () { if (onFail) onFail(); }); }
+    return true;
+  } catch (e) { return false; }
 }
 function synth(type) {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -130,8 +136,7 @@ function beep(type) {
     if (!S.sound) return;
     ensureSnd();
     var key = (type === 'out' && S.outAlt) ? 'out-alt' : type;
-    if (snd.ok[key] && playSnd(key)) return;
-    synth(type);
+    if (!playSnd(key, function () { synth(type); })) synth(type);
   } catch (e) {}
 }
 try {
