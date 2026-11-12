@@ -6,12 +6,14 @@ $out  = Join-Path $root 'deploy'
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 New-Item -ItemType Directory -Path $out | Out-Null
 
-$files = @('index.html', 'app.js', 'style.css', 'sw.js', 'manifest.json', 'xlsx.full.min.js')
+$files = @('index.html', 'app.js', 'style.css', 'sw.js', 'manifest.json')
 foreach ($f in $files) {
   $src = Join-Path $root $f
   if (-not (Test-Path $src)) { Write-Error ("missing: " + $f); exit 1 }
   Copy-Item $src $out
 }
+New-Item -ItemType Directory -Path (Join-Path $out 'vendor') -Force | Out-Null
+Copy-Item (Join-Path $root 'vendor\xlsx.full.min.js') (Join-Path $out 'vendor')
 Copy-Item (Join-Path $root 'icons') $out -Recurse
 Copy-Item (Join-Path $root 'sounds') $out -Recurse
 $soundReadme = Join-Path $out 'sounds\README.md'

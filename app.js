@@ -35,7 +35,7 @@ function ensureXLSX(cb) {
   }
   xlsxState = 1;
   var s = document.createElement('script');
-  s.src = 'xlsx.full.min.js';
+  s.src = 'vendor/xlsx.full.min.js';
   s.onload = function () { xlsxState = 2; cb(); };
   s.onerror = function () { xlsxState = 0; toast('Excel 解析组件加载失败，请联网重试'); };
   document.head.appendChild(s);
