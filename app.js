@@ -354,9 +354,8 @@ function showSwapDialog() {
   m.querySelector('[data-dlg="cancel"]').onclick = closeDialog;
   m.querySelector('[data-dlg="new"]').onclick = function () {
     closeDialog();
-    showPrompt('新建名单', '', function (v) {
-      createList(v); V.name = 'members'; V.q = ''; render(); toast('已新建名单「' + v + '」，先添加人员');
-    });
+    var nl = createList(); V.name = 'members'; V.q = ''; render();
+    toast('已新建名单「' + nl.name + '」，先添加人员');
   };
   m.querySelectorAll('[data-swap]').forEach(function (b) {
     b.onclick = function () {
@@ -761,6 +760,7 @@ function viewLists() {
         <div class="t2">${l.members.length} 人 · 已点 ${rounds} 轮</div>
       </div><div class="ops">
         ${cur ? '' : `<button class="mini" data-act="switchList" data-id="${l.id}">切换</button>`}
+        <button class="mini" data-act="renameList" data-id="${l.id}">改名</button>
         <button class="mini" data-act="editMembers" data-id="${l.id}">成员</button>
         <button class="mini danger" data-act="delList" data-id="${l.id}">删</button>
       </div></div>`;
@@ -1490,13 +1490,20 @@ function act(a, el) {
     case 'goMembers': { if (L) { V.name = 'members'; V.q = ''; render(); } break; }
 
     case 'newList': {
-      showPrompt('新建名单', '', function (v) {
-        createList(v); V.name = 'members'; V.q = ''; render(); toast('已建名单「' + v + '」，先添加人员');
-      });
+      var nl = createList(); V.name = 'members'; V.q = ''; render();
+      toast('已建名单「' + nl.name + '」，先添加人员');
       break;
     }
     case 'swapList': { showSwapDialog(); break; }
     case 'switchList': { S.activeId = id; save(); render(); toast('已切换到该名单'); break; }
+    case 'renameList': {
+      var rl = S.lists.filter(function (x) { return x.id === id; })[0];
+      if (!rl) break;
+      showPrompt('修改名单名称', rl.name, function (v) {
+        rl.name = v; save(); render(); toast('已改名');
+      });
+      break;
+    }
     case 'editMembers': { S.activeId = id; save(); V.name = 'members'; V.q = ''; render(); break; }
     case 'delList': {
       var l = S.lists.filter(function (x) { return x.id === id; })[0];
@@ -1620,10 +1627,8 @@ function act(a, el) {
     case 'importMembers': { pickRosterFile(); break; }
     case 'importPaste': { showPasteDialog(); break; }
     case 'importHome': {
-      showPrompt('新建名单（导入名册）', '计算机242班', function (v) {
-        createList(v); V.name = 'members'; V.q = ''; render();
-        setTimeout(pickRosterFile, 60);
-      });
+      createList(); V.name = 'members'; V.q = ''; render();
+      setTimeout(pickRosterFile, 60);
       break;
     }
 
