@@ -1,4 +1,4 @@
-const CACHE = 'dianming-v8';
+const CACHE = 'dianming-v9';
 const ASSETS = [
   './index.html',
   './style.css',
@@ -13,7 +13,7 @@ self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(CACHE)
       .then((c) => c.addAll(ASSETS).then(() => Promise.all(
-        ['./sounds/in.mp3', './sounds/out.mp3', './sounds/out-alt.mp3', './sounds/leave.mp3']
+        ['./sounds/in0.mp3', './sounds/in1.mp3', './sounds/in2.mp3', './sounds/in3.mp3', './sounds/in4.mp3', './sounds/out.mp3', './sounds/out-alt.mp3', './sounds/leave.mp3']
           .map((u) => c.add(u).catch(() => {}))
       )))
       .then(() => self.skipWaiting())

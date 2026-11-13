@@ -69,7 +69,7 @@ function applyGlass() {
   document.documentElement.style.setProperty('--glass-a', S.glass);
 }
 var audioCtx = null;
-var sndKeys = ['in', 'out', 'out-alt', 'leave'];
+var sndKeys = ['in0', 'in1', 'in2', 'in3', 'in4', 'out', 'out-alt', 'leave'];
 var snd = { ready: false, files: {}, ok: {} };
 function ensureSnd() {
   if (snd.ready) return;
@@ -131,12 +131,26 @@ function synth(type) {
     else { tone(523, 523, .12, 'triangle', .12); tone(659, 659, .12, 'triangle', .12, .1); tone(784, 1046, .22, 'triangle', .13, .2); }
   }
 }
+var inStreak = 0;
+function soundKeyFor(type) {
+  if (type === 'in') return 'in' + Math.min(inStreak, 4);
+  if (type === 'out' && S.outAlt) return 'out-alt';
+  return type;
+}
+function synthType(key) {
+  if (key.indexOf('in') === 0) return 'in';
+  if (key === 'out-alt') return 'out';
+  return key;
+}
 function beep(type) {
+  beepKey(soundKeyFor(type));
+}
+function beepKey(key) {
   try {
     if (!S.sound) return;
     ensureSnd();
-    var key = (type === 'out' && S.outAlt) ? 'out-alt' : type;
-    if (!playSnd(key, function () { synth(type); })) synth(type);
+    var t = synthType(key);
+    if (!playSnd(key, function () { synth(t); })) synth(t);
   } catch (e) {}
 }
 try {
@@ -527,6 +541,7 @@ function mark(st) {
   else { card.style.transform = 'translateY(-115%) scale(.96)'; }
   card.style.opacity = '0';
   beep(st);
+  inStreak = (st === 'in') ? inStreak + 1 : 0;
   try { if (navigator.vibrate) navigator.vibrate(8); } catch (e) {}
   setTimeout(next, 190);
 }
@@ -537,7 +552,9 @@ function undoMark() {
   if (!r || busy) return;
   if (r.idx <= 0) { toast('已经是第一位了'); return; }
   r.idx--;
+  var was = r.res[r.order[r.idx]];
   delete r.res[r.order[r.idx]];
+  if (was === 'in') inStreak = Math.max(0, inStreak - 1); else inStreak = 0;
   save(); render();
 }
 
@@ -1640,12 +1657,12 @@ function act(a, el) {
     case 'setTheme': { S.theme = el.getAttribute('data-v'); save(); render(); break; }
     case 'setOrder': { S.random = el.getAttribute('data-v') === 'random'; save(); render(); break; }
     case 'setSound': { S.sound = el.getAttribute('data-v') === '1'; save(); render(); break; }
-    case 'setSoundTheme': { S.soundTheme = el.getAttribute('data-v'); save(); render(); beep('in'); break; }
-    case 'setOutAlt': { S.outAlt = el.getAttribute('data-v') === '1'; save(); render(); beep('out'); break; }
+    case 'setSoundTheme': { S.soundTheme = el.getAttribute('data-v'); save(); render(); synth('in'); break; }
+    case 'setOutAlt': { S.outAlt = el.getAttribute('data-v') === '1'; save(); render(); beepKey(S.outAlt ? 'out-alt' : 'out'); break; }
     case 'testSound': {
-      beep('in');
-      setTimeout(function () { beep('out'); }, 700);
-      setTimeout(function () { beep('leave'); }, 1500);
+      beepKey('in0');
+      setTimeout(function () { beepKey(S.outAlt ? 'out-alt' : 'out'); }, 700);
+      setTimeout(function () { beepKey('leave'); }, 1500);
       break;
     }
 
